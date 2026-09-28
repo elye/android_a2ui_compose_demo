@@ -127,7 +127,7 @@ val demoPrompts: List<DemoPrompt> = listOf(
         messages = header() + updateComponents(
             """
             {"id":"root","component":"Column","children":["video-1","video-caption"]},
-            {"id":"video-1","component":"Video","url":"https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"},
+            {"id":"video-1","component":"Video","url":"https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4"},
             {"id":"video-caption","component":"Text","text":"A Video component streaming a sample clip.","variant":"caption"}
             """.trimIndent()
         ),

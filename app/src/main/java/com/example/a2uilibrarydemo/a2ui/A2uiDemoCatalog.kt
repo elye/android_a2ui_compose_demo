@@ -3,12 +3,21 @@ package com.example.a2uilibrarydemo.a2ui
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.a2ui.catalog.materialA2uiBasicCatalogV1
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Composer
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -17,12 +26,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.a2ui.compose.runtime.A2uiComponentScope
 import androidx.a2ui.compose.ui.A2uiCatalog
 import androidx.a2ui.compose.ui.catalog.A2uiBasicCatalogV1
 import androidx.a2ui.model.catalog.functions.A2uiLocaleProvider
 import androidx.a2ui.model.catalog.functions.A2uiMessageFormatter
 import androidx.a2ui.model.catalog.functions.A2uiUrlOpener
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.URL
@@ -80,7 +96,7 @@ private object DemoImage : A2uiBasicCatalogV1.Image {
     }
 }
 
-/** Video playback is not implemented for this tutorial; shows a URL placeholder instead. */
+/** Plays a remote video with Media3 ExoPlayer inside an [PlayerView] (no extra UI deps). */
 private object DemoVideo : A2uiBasicCatalogV1.Video {
     @Composable
     override fun A2uiComponentScope.TypedContent(
@@ -88,13 +104,31 @@ private object DemoVideo : A2uiBasicCatalogV1.Video {
         accessibility: A2uiBasicCatalogV1.AccessibilityAttributes?,
         modifier: Modifier,
     ) {
-        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Video placeholder:\n$url")
+        val context = LocalContext.current
+        val exoPlayer = remember(url) {
+            ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri(url))
+                prepare()
+                playWhenReady = true
+            }
         }
+        DisposableEffect(exoPlayer) {
+            onDispose { exoPlayer.release() }
+        }
+        AndroidView(
+            modifier = modifier.fillMaxSize(),
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    player = exoPlayer
+                    useController = true
+                }
+            },
+            update = { it.player = exoPlayer },
+        )
     }
 }
 
-/** Audio playback is not implemented for this tutorial; shows a URL placeholder instead. */
+/** Plays a remote audio stream with Media3 ExoPlayer behind a simple play/pause control. */
 private object DemoAudioPlayer : A2uiBasicCatalogV1.AudioPlayer {
     @Composable
     override fun A2uiComponentScope.TypedContent(
@@ -103,8 +137,37 @@ private object DemoAudioPlayer : A2uiBasicCatalogV1.AudioPlayer {
         accessibility: A2uiBasicCatalogV1.AccessibilityAttributes?,
         modifier: Modifier,
     ) {
-        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Audio placeholder: ${description.orEmpty()}\n$url")
+        val context = LocalContext.current
+        val exoPlayer = remember(url) {
+            ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri(url))
+                prepare()
+            }
+        }
+        var isPlaying by remember(url) { mutableStateOf(false) }
+        DisposableEffect(exoPlayer) {
+            val listener = object : Player.Listener {
+                override fun onIsPlayingChanged(playing: Boolean) {
+                    isPlaying = playing
+                }
+            }
+            exoPlayer.addListener(listener)
+            onDispose {
+                exoPlayer.removeListener(listener)
+                exoPlayer.release()
+            }
+        }
+        Row(
+            modifier = modifier.fillMaxWidth().padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() }) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (isPlaying) "Pause" else "Play",
+                )
+            }
+            Text(description?.takeIf { it.isNotBlank() } ?: url)
         }
     }
 }
