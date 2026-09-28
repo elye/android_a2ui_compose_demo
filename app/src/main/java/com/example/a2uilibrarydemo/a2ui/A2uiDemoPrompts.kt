@@ -38,6 +38,26 @@ private fun createSurfaceMessage(catalogId: String = BASIC_CATALOG_V1_ID) =
 private fun updateComponents(componentsJson: String) =
     """{"version":"$PROTOCOL_VERSION","updateComponents":{"surfaceId":"$DEMO_SURFACE_ID","components":[$componentsJson]}}"""
 
+/**
+ * Seeds a value in the surface's data model at [path]. This is REQUIRED for any component
+ * property that should be interactively writable (e.g. CheckBox's `value`, TextField's `value`,
+ * Slider's `value`, ChoicePicker's `value`, DateTimeInput's `value`): the A2UI Compose runtime's
+ * `bindUpdater()` only produces a working write-callback (and thus an enabled/interactive widget)
+ * when the corresponding JSON property is expressed as a data-binding reference
+ * `{"path":"<path>"}` rather than a plain literal. A plain literal only ever flows through the
+ * read-only `bind()` path, so the component renders correctly but its `onValueChange`/
+ * `onCheckedChange` callback is null and the widget is effectively disabled — this is exactly
+ * why CheckBox (and friends) previously rendered but didn't respond to taps.
+ */
+private fun updateDataModel(path: String, valueJson: String): String {
+    // updateDataModel requires an ABSOLUTE path (leading "/"), unlike a component's own
+    // "path" data-binding reference which is resolved relative to the surface's root and
+    // works fine without one. Confirmed via the runtime's own validation error message:
+    // "Data model update path must be absolute".
+    val absolutePath = if (path.startsWith("/")) path else "/$path"
+    return """{"version":"$PROTOCOL_VERSION","updateDataModel":{"surfaceId":"$DEMO_SURFACE_ID","path":"$absolutePath","value":$valueJson}}"""
+}
+
 /** Builds the standard header used by every demo: just the createSurface message. */
 private fun header(catalogId: String = BASIC_CATALOG_V1_ID): List<String> =
     listOf(createSurfaceMessage(catalogId))
@@ -250,69 +270,85 @@ val demoPrompts: List<DemoPrompt> = listOf(
         title = "TextField",
         description = "Show shortText, longText, number, and obscured TextField variants.",
         category = "Input",
-        messages = header() + updateComponents(
-            """
-            {"id":"root","component":"Column","children":["tf-short","tf-long","tf-number","tf-obscured"]},
-            {"id":"tf-short","component":"TextField","label":"Short text","variant":"shortText","value":""},
-            {"id":"tf-long","component":"TextField","label":"Long text","variant":"longText","value":""},
-            {"id":"tf-number","component":"TextField","label":"Number","variant":"number","value":""},
-            {"id":"tf-obscured","component":"TextField","label":"Password","variant":"obscured","value":""}
-            """.trimIndent()
-        ),
+        messages = header() +
+            updateDataModel("tf-short", "\"\"") +
+            updateDataModel("tf-long", "\"\"") +
+            updateDataModel("tf-number", "\"\"") +
+            updateDataModel("tf-obscured", "\"\"") +
+            updateComponents(
+                """
+                {"id":"root","component":"Column","children":["tf-short","tf-long","tf-number","tf-obscured"]},
+                {"id":"tf-short","component":"TextField","label":"Short text","variant":"shortText","value":{"path":"tf-short"}},
+                {"id":"tf-long","component":"TextField","label":"Long text","variant":"longText","value":{"path":"tf-long"}},
+                {"id":"tf-number","component":"TextField","label":"Number","variant":"number","value":{"path":"tf-number"}},
+                {"id":"tf-obscured","component":"TextField","label":"Password","variant":"obscured","value":{"path":"tf-obscured"}}
+                """.trimIndent()
+            ),
     ),
     DemoPrompt(
         id = "checkbox",
         title = "CheckBox",
         description = "Show two CheckBox components with different initial states.",
         category = "Input",
-        messages = header() + updateComponents(
-            """
-            {"id":"root","component":"Column","children":["cb-1","cb-2"]},
-            {"id":"cb-1","component":"CheckBox","label":"Unchecked option","value":false},
-            {"id":"cb-2","component":"CheckBox","label":"Checked option","value":true}
-            """.trimIndent()
-        ),
+        messages = header() +
+            updateDataModel("cb-1", "false") +
+            updateDataModel("cb-2", "true") +
+            updateComponents(
+                """
+                {"id":"root","component":"Column","children":["cb-1","cb-2"]},
+                {"id":"cb-1","component":"CheckBox","label":"Unchecked option","value":{"path":"cb-1"}},
+                {"id":"cb-2","component":"CheckBox","label":"Checked option","value":{"path":"cb-2"}}
+                """.trimIndent()
+            ),
     ),
     DemoPrompt(
         id = "choice-picker",
         title = "ChoicePicker",
         description = "Show mutually-exclusive and multiple-selection ChoicePicker variants.",
         category = "Input",
-        messages = header() + updateComponents(
-            """
-            {"id":"root","component":"Column","children":["cp-single-label","cp-single","cp-multi-label","cp-multi"]},
-            {"id":"cp-single-label","component":"Text","text":"Single choice (checkbox style)","variant":"caption"},
-            {"id":"cp-single","component":"ChoicePicker","label":"Pick one","variant":"mutuallyExclusive","displayStyle":"checkbox","options":[{"label":"Option A","value":"a"},{"label":"Option B","value":"b"},{"label":"Option C","value":"c"}],"value":["a"]},
-            {"id":"cp-multi-label","component":"Text","text":"Multiple choice (chips style)","variant":"caption"},
-            {"id":"cp-multi","component":"ChoicePicker","label":"Pick many","variant":"multipleSelection","displayStyle":"chips","options":[{"label":"Red","value":"red"},{"label":"Green","value":"green"},{"label":"Blue","value":"blue"}],"value":["red","blue"]}
-            """.trimIndent()
-        ),
+        messages = header() +
+            updateDataModel("cp-single", """["a"]""") +
+            updateDataModel("cp-multi", """["red","blue"]""") +
+            updateComponents(
+                """
+                {"id":"root","component":"Column","children":["cp-single-label","cp-single","cp-multi-label","cp-multi"]},
+                {"id":"cp-single-label","component":"Text","text":"Single choice (checkbox style)","variant":"caption"},
+                {"id":"cp-single","component":"ChoicePicker","label":"Pick one","variant":"mutuallyExclusive","displayStyle":"checkbox","options":[{"label":"Option A","value":"a"},{"label":"Option B","value":"b"},{"label":"Option C","value":"c"}],"value":{"path":"cp-single"}},
+                {"id":"cp-multi-label","component":"Text","text":"Multiple choice (chips style)","variant":"caption"},
+                {"id":"cp-multi","component":"ChoicePicker","label":"Pick many","variant":"multipleSelection","displayStyle":"chips","options":[{"label":"Red","value":"red"},{"label":"Green","value":"green"},{"label":"Blue","value":"blue"}],"value":{"path":"cp-multi"}}
+                """.trimIndent()
+            ),
     ),
     DemoPrompt(
         id = "slider",
         title = "Slider",
         description = "Show a Slider component with a label, min, and max.",
         category = "Input",
-        messages = header() + updateComponents(
-            """
-            {"id":"root","component":"Column","children":["slider-label","slider-1"]},
-            {"id":"slider-label","component":"Text","text":"Volume","variant":"caption"},
-            {"id":"slider-1","component":"Slider","label":"Volume","min":0,"max":100,"value":42}
-            """.trimIndent()
-        ),
+        messages = header() +
+            updateDataModel("slider-1", "42") +
+            updateComponents(
+                """
+                {"id":"root","component":"Column","children":["slider-label","slider-1"]},
+                {"id":"slider-label","component":"Text","text":"Volume","variant":"caption"},
+                {"id":"slider-1","component":"Slider","label":"Volume","min":0,"max":100,"value":{"path":"slider-1"}}
+                """.trimIndent()
+            ),
     ),
     DemoPrompt(
         id = "date-time-input",
         title = "DateTimeInput",
         description = "Show DateTimeInput components with date-only and time-only modes.",
         category = "Input",
-        messages = header() + updateComponents(
-            """
-            {"id":"root","component":"Column","children":["dt-date","dt-time"]},
-            {"id":"dt-date","component":"DateTimeInput","label":"Pick a date","enableDate":true,"enableTime":false,"value":""},
-            {"id":"dt-time","component":"DateTimeInput","label":"Pick a time","enableDate":false,"enableTime":true,"value":""}
-            """.trimIndent()
-        ),
+        messages = header() +
+            updateDataModel("dt-date", "\"\"") +
+            updateDataModel("dt-time", "\"\"") +
+            updateComponents(
+                """
+                {"id":"root","component":"Column","children":["dt-date","dt-time"]},
+                {"id":"dt-date","component":"DateTimeInput","label":"Pick a date","enableDate":true,"enableTime":false,"value":{"path":"dt-date"}},
+                {"id":"dt-time","component":"DateTimeInput","label":"Pick a time","enableDate":false,"enableTime":true,"value":{"path":"dt-time"}}
+                """.trimIndent()
+            ),
     ),
 )
 
