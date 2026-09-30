@@ -2,7 +2,10 @@
 
 An Android tutorial app that demonstrates the capabilities of **[A2UI Compose](https://developer.android.com/jetpack/androidx/releases/a2ui-compose)** — a Jetpack library that lets a client render a live, interactive Compose UI from a stream of server-sent JSON messages (the *A2UI protocol*), as commonly used to render UI driven by an AI agent.
 
-The app presents a simple, selectable list of "prompts." Tapping a prompt feeds a small, hand-written script of A2UI protocol messages into a live `A2uiMessageProcessor`, and the resulting UI is rendered on screen using the official A2UI Basic Catalog V1 component set. It's a hands-on catalog of every component in the spec — a comprehensive tutorial for what A2UI can render and how the protocol works under the hood.
+The app opens on a **Home** screen with two modes:
+
+- **Catalog Demo** — the original tutorial: a selectable list of "prompts," each a small, hand-written script of A2UI protocol messages fed into a live `A2uiMessageProcessor`. It's a hands-on catalog of every component in the spec.
+- **AI Prompt Demo** — a real agent-to-UI round trip: type a free-text request (e.g. "a sign-up form with a name field and a submit button"), and the **Gemini API** writes the A2UI JSON-Lines script itself, which is rendered live using the exact same renderer as the Catalog Demo. A **Settings** screen (gear icon on Home) lets you paste in your own Gemini API key.
 
 ## What is A2UI?
 
@@ -37,19 +40,32 @@ flowchart TD
 app/src/main/java/com/example/a2uilibrarydemo/
 ├── MainActivity.kt              Entry point + root composable (prompt picker <-> demo screen)
 ├── ui/theme/                    Standard Compose Material3 theme (Color/Theme/Type)
-└── a2ui/
-    ├── A2uiDemoPrompts.kt       The 17 tutorial "prompts": raw A2UI JSON-Lines scripts + metadata
-    ├── A2uiDemoScreen.kt        Wires a DemoPrompt into a live A2uiMessageProcessor + A2uiSurface
-    └── A2uiDemoCatalog.kt       Builds the A2uiCatalog: supplies Image/Video/AudioPlayer/UrlOpener/
-                                 MessageFormatter implementations the Basic Catalog V1 needs
+├── a2ui/
+│   ├── A2uiDemoPrompts.kt       The 17 tutorial "prompts": raw A2UI JSON-Lines scripts + metadata
+│   ├── A2uiDemoScreen.kt        A2uiDemoScreen (per DemoPrompt) + A2uiMessagesRenderer (reusable core:
+│   │                            processor/parser + A2uiSurface, shared with the AI Prompt screen)
+│   └── A2uiDemoCatalog.kt       Builds the A2uiCatalog: supplies Image/Video/AudioPlayer/UrlOpener/
+│                                MessageFormatter implementations the Basic Catalog V1 needs
+└── ai/
+    ├── GeminiClient.kt         Calls the Gemini `generateContent` REST endpoint with a system
+    │                           prompt teaching the model the A2UI protocol contract; returns the
+    │                           response split into A2UI JSON-Lines messages
+    ├── GeminiApiKeyStore.kt    Persists the user's Gemini API key in local SharedPreferences
+    ├── AiPromptScreen.kt       Free-text prompt field + "Generate UI" button; renders the result
+    │                           via A2uiMessagesRenderer
+    └── GeminiSettingsScreen.kt Lets the user paste in / save their Gemini API key
 ```
 
 | File | Responsibility |
 |---|---|
-| `MainActivity.kt` | Hosts a `Scaffold` with a `TopAppBar`. Shows `DemoPromptList` (grouped by category) when nothing is selected, or `A2uiDemoScreen` for the selected `DemoPrompt`. Selection state survives process death via `rememberSaveable`. |
+| `MainActivity.kt` | Hosts a `Scaffold` with a `TopAppBar` and a `HomeScreen` with two entry points, `TopScreen.CATALOG` and `TopScreen.AI_PROMPT`, plus a `TopScreen.SETTINGS` destination. Selection state survives process death via `rememberSaveable`. |
 | `A2uiDemoPrompts.kt` | Defines the `DemoPrompt` data class and the full list of demo prompts, each expressed as a list of raw A2UI protocol JSON strings. Includes helper functions (`header()`, `updateComponents()`, `updateDataModel()`) for building protocol-correct message envelopes. |
-| `A2uiDemoScreen.kt` | For a given `DemoPrompt`: creates a fresh `A2uiMessageProcessor`/`A2uiMessageParser` pair, starts `collectMessages()`, feeds every line of the prompt's script through `processInput()`, logs any outbound `A2uiClientErrorMessage`s, and renders the resulting surface with `A2uiSurface`. |
+| `A2uiDemoScreen.kt` | `A2uiMessagesRenderer(messages, key, ...)` is the reusable core: creates a fresh `A2uiMessageProcessor`/`A2uiMessageParser` pair keyed on `key`, starts `collectMessages()`, feeds every line of `messages` through `processInput()`, logs any outbound `A2uiClientErrorMessage`s, and renders the resulting surface with `A2uiSurface`. `A2uiDemoScreen(prompt)` is a thin wrapper over it for the Catalog Demo; `AiPromptScreen` calls it directly with Gemini-generated messages. |
 | `A2uiDemoCatalog.kt` | Builds the single `A2uiCatalog` (via `materialA2uiBasicCatalogV1(...)`) shared by every demo, providing the five component slots that have no built-in Material default: `Image`, `Video`, `AudioPlayer`, `UrlOpener`, `MessageFormatter`. |
+| `GeminiClient.kt` | Plain `HttpURLConnection` + `org.json` call to `POST /v1beta/models/{model}:generateContent` (no SDK dependency). The system instruction restates the exact protocol rules from `A2uiDemoPrompts.kt` (version-as-sibling, `root` id, absolute `updateDataModel` paths, data-binding for interactive values) plus the full Basic Catalog V1 component/property reference, so Gemini's freeform response is a directly-consumable JSON-Lines script. |
+| `GeminiApiKeyStore.kt` | Reads/writes the API key from a private `SharedPreferences` file. |
+| `AiPromptScreen.kt` | Free-text prompt input (with tap-to-fill suggestions), calls `generateA2uiScript()` on a coroutine, and renders the result via `A2uiMessagesRenderer`. |
+| `GeminiSettingsScreen.kt` | Simple API key entry field (with a show/hide toggle) that saves to `GeminiApiKeyStore`. |
 
 ## The A2UI protocol, as used by this app
 
@@ -102,17 +118,19 @@ The prompt list is grouped into four categories, covering every A2UI Basic Catal
 - **Image** (`A2uiDemoCatalog.kt`): loaded with plain `BitmapFactory.decodeStream` on `Dispatchers.IO` — no third-party image-loading library.
 - **Video / AudioPlayer**: implemented with [Media3 ExoPlayer](https://developer.android.com/media/media3/exoplayer) (`androidx.media3:media3-exoplayer` + `media3-ui` + `media3-session`). Each demo builds its own `ExoPlayer` instance (`remember(url) { ... }`), releasing it via `DisposableEffect` when the composable leaves.
 - **No `Modifier.verticalScroll()`** wraps `A2uiSurface` — some catalog components (e.g. `List`) render their own `LazyColumn` internally, and nesting a `LazyColumn` inside a `verticalScroll()` container throws at runtime. Each rendered component manages its own scrolling.
-- **Error visibility**: `A2uiMessageProcessor` swallows protocol/validation exceptions internally and re-emits them as `A2uiClientErrorMessage` on its `outboundEvents` flow rather than throwing — `A2uiDemoScreen` collects that flow and logs errors under tag `A2uiDemoScreen`, which is essential for debugging since these errors never crash the app or show a visible toast:
+- **Error visibility**: `A2uiMessageProcessor` swallows protocol/validation exceptions internally and re-emits them as `A2uiClientErrorMessage` on its `outboundEvents` flow rather than throwing — `A2uiMessagesRenderer` collects that flow and logs errors under tag `A2uiDemoScreen`, which is essential for debugging since these errors never crash the app or show a visible toast:
   ```
   adb logcat -s A2uiDemoScreen:*
   ```
+- **AI Prompt Demo / Gemini integration** (`ai/GeminiClient.kt`): calls the Gemini API's `generateContent` REST endpoint directly (`HttpURLConnection` + `org.json`, no SDK dependency) with a system instruction that restates this app's own hard-won protocol rules (version-as-sibling, `root` id, absolute `updateDataModel` paths, data-binding for interactive values) plus a reference of every Basic Catalog V1 component and its properties. The model's freeform text response is split into non-blank lines and fed straight into the same `A2uiMessagesRenderer` the Catalog Demo uses — no translation layer needed, since the model is instructed to emit valid A2UI JSON-Lines directly.
 
 ## Requirements
 
 - Android Studio with AGP 9.4.1 / Gradle (via the included wrapper)
 - Kotlin 2.2.10, Jetpack Compose BOM 2026.02.01
 - minSdk 24, targetSdk 37, compileSdk 37.1
-- An internet connection (demo content streams images/video/audio from public URLs)
+- An internet connection (demo content streams images/video/audio from public URLs; AI Prompt Demo calls the Gemini API)
+- A [Gemini API key](https://aistudio.google.com/apikey) (free) to use the **AI Prompt Demo** — not required for the Catalog Demo. Paste it into the in-app Settings screen (gear icon on the Home screen).
 
 ## Building & running
 
@@ -131,6 +149,8 @@ Or simply open the project in Android Studio and run the `app` configuration on 
 | `androidx.compose.material3:material3-a2ui` | Material3 renderers for the A2UI Basic Catalog V1 components |
 | `androidx.media3:media3-exoplayer` / `media3-ui` / `media3-session` | Real Video/AudioPlayer playback |
 | `androidx.compose.material3` / `material-icons-extended` | Standard Compose Material3 UI + icon set |
+
+No additional dependency was needed for the Gemini integration — `GeminiClient.kt` uses the platform's built-in `java.net.HttpURLConnection` and `org.json`.
 
 ## Extending this tutorial
 

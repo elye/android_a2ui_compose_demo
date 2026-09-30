@@ -5,12 +5,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ViewQuilt
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -24,7 +29,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -33,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import com.example.a2uilibrarydemo.a2ui.A2uiDemoScreen
 import com.example.a2uilibrarydemo.a2ui.DemoPrompt
 import com.example.a2uilibrarydemo.a2ui.demoPromptsByCategory
+import com.example.a2uilibrarydemo.ai.AiPromptScreen
+import com.example.a2uilibrarydemo.ai.GeminiSettingsScreen
 import com.example.a2uilibrarydemo.ui.theme.A2UILibraryDemoTheme
 
 class MainActivity : ComponentActivity() {
@@ -47,40 +53,155 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** The app's top-level destinations, selectable from the [HomeScreen]. */
+private enum class TopScreen {
+    /** Landing screen: pick between the two modes below. */
+    HOME,
+
+    /** The original tutorial: a picker of hand-written A2UI JSON-Lines scripts, one per component. */
+    CATALOG,
+
+    /** The new demo: a free-text prompt is sent to Gemini, which writes the A2UI script itself. */
+    AI_PROMPT,
+
+    /** Where the user pastes their Gemini API key, used by [AI_PROMPT]. */
+    SETTINGS,
+}
+
 /**
- * Root composable for the A2UI tutorial app: shows a selectable list of demo prompts, one per
- * A2UI Basic Catalog V1 component, and switches to a live-rendered [A2uiDemoScreen] on selection.
+ * Root composable for the A2UI tutorial app. Shows a [HomeScreen] with two entry points:
+ * - **Catalog Demo**: the original tutorial, a selectable list of hand-written A2UI prompts, one
+ *   per Basic Catalog V1 component, rendered directly by [A2uiDemoScreen].
+ * - **AI Prompt Demo**: a free-text prompt is sent to the Gemini API (see [AiPromptScreen]), which
+ *   writes an A2UI JSON-Lines script on the fly; the result is rendered the exact same way.
+ *
+ * A [TopScreen.SETTINGS] destination (reachable from the home screen's toolbar action, or from the
+ * AI Prompt screen directly) lets the user paste in their own Gemini API key.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun A2uiDemoApp(modifier: Modifier = Modifier) {
+    var topScreen by rememberSaveable { mutableStateOf(TopScreen.HOME) }
     var selectedPrompt by rememberSaveable(stateSaver = DemoPromptIdSaver) {
         mutableStateOf<DemoPrompt?>(null)
+    }
+
+    val title = when (topScreen) {
+        TopScreen.HOME -> "A2UI Library Demo"
+        TopScreen.CATALOG -> selectedPrompt?.title ?: "Catalog Demo"
+        TopScreen.AI_PROMPT -> "AI Prompt Demo"
+        TopScreen.SETTINGS -> "Settings"
+    }
+
+    // Simple back behavior: drill back one level at a time rather than a full nav stack, since
+    // this app is only ever two levels deep (top screen -> optional catalog prompt detail).
+    fun goBack() {
+        when (topScreen) {
+            TopScreen.CATALOG -> if (selectedPrompt != null) {
+                selectedPrompt = null
+            } else {
+                topScreen = TopScreen.HOME
+            }
+            TopScreen.AI_PROMPT, TopScreen.SETTINGS -> topScreen = TopScreen.HOME
+            TopScreen.HOME -> Unit
+        }
     }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text(selectedPrompt?.title ?: "A2UI Component Tutorial") },
+                title = { Text(title) },
                 navigationIcon = {
-                    if (selectedPrompt != null) {
-                        IconButton(onClick = { selectedPrompt = null }) {
+                    if (topScreen != TopScreen.HOME) {
+                        IconButton(onClick = { goBack() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                },
+                actions = {
+                    if (topScreen == TopScreen.HOME) {
+                        IconButton(onClick = { topScreen = TopScreen.SETTINGS }) {
+                            Icon(Icons.Filled.Settings, contentDescription = "Gemini API key settings")
                         }
                     }
                 },
             )
         },
     ) { innerPadding ->
-        val prompt = selectedPrompt
-        if (prompt == null) {
-            DemoPromptList(
-                onPromptSelected = { selectedPrompt = it },
+        when (topScreen) {
+            TopScreen.HOME -> HomeScreen(
+                onCatalogSelected = { topScreen = TopScreen.CATALOG },
+                onAiPromptSelected = { topScreen = TopScreen.AI_PROMPT },
                 modifier = Modifier.padding(innerPadding),
             )
-        } else {
-            A2uiDemoScreen(prompt = prompt, modifier = Modifier.padding(innerPadding))
+
+            TopScreen.CATALOG -> {
+                val prompt = selectedPrompt
+                if (prompt == null) {
+                    DemoPromptList(
+                        onPromptSelected = { selectedPrompt = it },
+                        modifier = Modifier.padding(innerPadding),
+                    )
+                } else {
+                    A2uiDemoScreen(prompt = prompt, modifier = Modifier.padding(innerPadding))
+                }
+            }
+
+            TopScreen.AI_PROMPT -> AiPromptScreen(
+                onOpenSettings = { topScreen = TopScreen.SETTINGS },
+                modifier = Modifier.padding(innerPadding),
+            )
+
+            TopScreen.SETTINGS -> GeminiSettingsScreen(modifier = Modifier.padding(innerPadding))
+        }
+    }
+}
+
+/** Landing screen: lets the user pick between the base catalog render and the AI-driven demo. */
+@Composable
+private fun HomeScreen(
+    onCatalogSelected: () -> Unit,
+    onAiPromptSelected: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+    ) {
+        item {
+            Text(
+                text = "Choose a demo mode",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+        }
+        item {
+            Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onCatalogSelected)) {
+                ListItem(
+                    leadingContent = { Icon(Icons.Filled.ViewQuilt, contentDescription = null) },
+                    headlineContent = { Text("Catalog Demo") },
+                    supportingContent = {
+                        Text("Browse hand-written A2UI scripts, one per Basic Catalog V1 component.")
+                    },
+                )
+            }
+        }
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp)
+                    .clickable(onClick = onAiPromptSelected),
+            ) {
+                ListItem(
+                    leadingContent = { Icon(Icons.Filled.AutoAwesome, contentDescription = null) },
+                    headlineContent = { Text("AI Prompt Demo") },
+                    supportingContent = {
+                        Text("Describe a UI in your own words and have Gemini generate + render it live.")
+                    },
+                )
+            }
         }
     }
 }

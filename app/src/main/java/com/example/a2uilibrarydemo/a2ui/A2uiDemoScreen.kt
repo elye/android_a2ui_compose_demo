@@ -34,10 +34,34 @@ private const val TAG = "A2uiDemoScreen"
  */
 @Composable
 fun A2uiDemoScreen(prompt: DemoPrompt, modifier: Modifier = Modifier) {
-    val processor = remember(prompt.id) {
+    A2uiMessagesRenderer(
+        messages = prompt.messages,
+        key = prompt.id,
+        modifier = modifier,
+        loadingLabel = "Loading ${prompt.title}…",
+    )
+}
+
+/**
+ * Reusable core of the demo: feeds an arbitrary A2UI JSON-Lines [messages] script into a fresh
+ * [androidx.a2ui.model.processor.A2uiMessageProcessor] and renders the resulting surface via
+ * [A2uiSurface]. Used both by [A2uiDemoScreen] (hand-written catalog scripts) and the AI Prompt
+ * screen (scripts generated on the fly by Gemini).
+ *
+ * A brand new processor/parser pair is created whenever [key] changes, so switching to a new
+ * script always starts from a clean slate.
+ */
+@Composable
+fun A2uiMessagesRenderer(
+    messages: List<String>,
+    key: Any,
+    modifier: Modifier = Modifier,
+    loadingLabel: String = "Loading…",
+) {
+    val processor = remember(key) {
         A2uiMessageProcessor(listOf(buildDemoCatalog()))
     }
-    val parser = remember(prompt.id) { A2uiMessageParser() }
+    val parser = remember(key) { A2uiMessageParser() }
 
     // The processor only enqueues incoming messages onto an internal channel; collectMessages()
     // must be actively running to drain that queue and actually apply the updates.
@@ -61,9 +85,9 @@ fun A2uiDemoScreen(prompt: DemoPrompt, modifier: Modifier = Modifier) {
         }
     }
 
-    // Feed every line of the demo script once the processor/parser for this prompt are ready.
-    LaunchedEffect(prompt.id, processor, parser) {
-        for (line in prompt.messages) {
+    // Feed every line of the script once the processor/parser for this key are ready.
+    LaunchedEffect(key, processor, parser) {
+        for (line in messages) {
             Log.d(TAG, "Sending line: $line")
             processor.processInput(parser, line)
         }
@@ -94,7 +118,7 @@ fun A2uiDemoScreen(prompt: DemoPrompt, modifier: Modifier = Modifier) {
                     .padding(16.dp),
             ) {
                 Text(
-                    text = "Loading ${prompt.title}…",
+                    text = loadingLabel,
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
