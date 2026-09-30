@@ -33,11 +33,21 @@ import androidx.compose.ui.unit.dp
 import com.example.a2uilibrarydemo.a2ui.A2uiMessagesRenderer
 import kotlinx.coroutines.launch
 
-/** A handful of starter prompts shown as quick-tap suggestions above the free-text field. */
+/**
+ * Starter prompts shown as quick-tap suggestions above the free-text field. Collectively these
+ * exercise every A2UI Basic Catalog V1 component (Text, Image, Icon, Video, AudioPlayer, Row,
+ * Column, List, Card, Tabs, Modal, Divider, Button, TextField, CheckBox, ChoicePicker, Slider,
+ * DateTimeInput) so a user can explore the full catalog without typing a prompt themselves.
+ */
 private val SUGGESTED_PROMPTS = listOf(
     "Sign-up form" to "A simple sign-up form with a name field, email field, and a primary submit button.",
     "Settings screen" to "A settings screen with a dark mode checkbox, a volume slider, and a notification frequency choice picker.",
     "Product card" to "A product card with an image, title, price, and an 'Add to cart' button.",
+    "Media player" to "A media player screen with a video player, an audio player below it, and a caption describing each.",
+    "Icon toolbar" to "A toolbar row of icon buttons (favorite, share, settings, home) separated by a divider from a caption below.",
+    "Profile card" to "A profile card showing an avatar image, a name, an icon-labelled row of stats, and a 'Follow' button.",
+    "Event booking" to "An event booking form with a date/time picker for the event date, a text field for attendee name, a choice picker for ticket type, and a 'Book now' button that opens a confirmation modal.",
+    "Login tabs" to "A login screen using tabs to switch between 'Sign in' (email + password fields) and 'Sign up' (name + email + password fields), each with its own submit button.",
     "Trip itinerary" to "A trip itinerary using tabs for 'Day 1' and 'Day 2', each showing a short list of activities.",
 )
 
