@@ -2,10 +2,13 @@
 
 An Android tutorial app that demonstrates the capabilities of **[A2UI Compose](https://developer.android.com/jetpack/androidx/releases/a2ui-compose)** — a Jetpack library that lets a client render a live, interactive Compose UI from a stream of server-sent JSON messages (the *A2UI protocol*), as commonly used to render UI driven by an AI agent.
 
-The app opens on a **Home** screen with two modes:
+The app opens on a **Home** screen with three modes:
 
 - **Catalog Demo** — the original tutorial: a selectable list of "prompts," each a small, hand-written script of A2UI protocol messages fed into a live `A2uiMessageProcessor`. It's a hands-on catalog of every component in the spec.
-- **AI Prompt Demo** — a real agent-to-UI round trip: type a free-text request (e.g. "a sign-up form with a name field and a submit button"), and the **Gemini API** writes the A2UI JSON-Lines script itself, which is rendered live using the exact same renderer as the Catalog Demo. A **Settings** screen (gear icon on Home) lets you paste in your own Gemini API key.
+- **AI Prompt Demo** — a one-shot agent-to-UI round trip: type a free-text request (e.g. "a sign-up form with a name field and a submit button"), and the **Gemini API** writes the A2UI JSON-Lines script itself, which is rendered live using the exact same renderer as the Catalog Demo.
+- **Multi-Step AI Demo** — the same idea, but conversational: after the first prompt renders a UI, tapping a `Button` in that generated UI (e.g. "Next", "Submit") is captured and sent back to Gemini as the next conversation turn, along with the current form values, so Gemini can respond with the next step of the flow — a real prompt -> UI -> interact -> continues loop. You can also type extra free-text instructions between steps.
+
+A **Settings** screen (gear icon on Home) lets you paste in your own Gemini API key, used by both AI-driven modes.
 
 ## What is A2UI?
 
@@ -47,24 +50,29 @@ app/src/main/java/com/example/a2uilibrarydemo/
 │   └── A2uiDemoCatalog.kt       Builds the A2uiCatalog: supplies Image/Video/AudioPlayer/UrlOpener/
 │                                MessageFormatter implementations the Basic Catalog V1 needs
 └── ai/
-    ├── GeminiClient.kt         Calls the Gemini `generateContent` REST endpoint with a system
-    │                           prompt teaching the model the A2UI protocol contract; returns the
-    │                           response split into A2UI JSON-Lines messages
+    ├── GeminiClient.kt         Calls the Gemini `generateContent` REST endpoint (single-shot or
+    │                           with conversation history) with a system prompt teaching the model
+    │                           the A2UI protocol contract; returns the parsed A2UI JSON-Lines
+    │                           messages plus the raw text (for appending to history)
     ├── GeminiApiKeyStore.kt    Persists the user's Gemini API key in local SharedPreferences
     ├── AiPromptScreen.kt       Free-text prompt field + "Generate UI" button; renders the result
-    │                           via A2uiMessagesRenderer
+    │                           via A2uiMessagesRenderer (one-shot, no conversation history)
+    ├── AiConversationScreen.kt Multi-step version: keeps a running Gemini conversation; a tapped
+    │                           Button in the rendered UI (via A2uiMessagesRenderer's
+    │                           onClientEvent) is described back to Gemini as the next turn
     └── GeminiSettingsScreen.kt Lets the user paste in / save their Gemini API key
 ```
 
 | File | Responsibility |
 |---|---|
-| `MainActivity.kt` | Hosts a `Scaffold` with a `TopAppBar` and a `HomeScreen` with two entry points, `TopScreen.CATALOG` and `TopScreen.AI_PROMPT`, plus a `TopScreen.SETTINGS` destination. Selection state survives process death via `rememberSaveable`. |
+| `MainActivity.kt` | Hosts a `Scaffold` with a `TopAppBar` and a `HomeScreen` with three entry points, `TopScreen.CATALOG`, `TopScreen.AI_PROMPT` and `TopScreen.AI_CONVERSATION`, plus a `TopScreen.SETTINGS` destination. Selection state survives process death via `rememberSaveable`. |
 | `A2uiDemoPrompts.kt` | Defines the `DemoPrompt` data class and the full list of demo prompts, each expressed as a list of raw A2UI protocol JSON strings. Includes helper functions (`header()`, `updateComponents()`, `updateDataModel()`) for building protocol-correct message envelopes. |
-| `A2uiDemoScreen.kt` | `A2uiMessagesRenderer(messages, key, ...)` is the reusable core: creates a fresh `A2uiMessageProcessor`/`A2uiMessageParser` pair keyed on `key`, starts `collectMessages()`, feeds every line of `messages` through `processInput()`, logs any outbound `A2uiClientErrorMessage`s, and renders the resulting surface with `A2uiSurface`. `A2uiDemoScreen(prompt)` is a thin wrapper over it for the Catalog Demo; `AiPromptScreen` calls it directly with Gemini-generated messages. |
+| `A2uiDemoScreen.kt` | `A2uiMessagesRenderer(messages, key, ..., onClientEvent)` is the reusable core: creates a fresh `A2uiMessageProcessor`/`A2uiMessageParser` pair keyed on `key`, starts `collectMessages()`, feeds every line of `messages` through `processInput()`, renders the resulting surface with `A2uiSurface` (auto-scrolling unless the script contains a self-scrolling `List`), and forwards every outbound `A2uiClientToServerMessage` (button taps, protocol errors) to `onClientEvent` as well as logcat. `A2uiDemoScreen(prompt)` is a thin wrapper over it for the Catalog Demo; `AiPromptScreen`/`AiConversationScreen` call it directly with Gemini-generated messages. |
 | `A2uiDemoCatalog.kt` | Builds the single `A2uiCatalog` (via `materialA2uiBasicCatalogV1(...)`) shared by every demo, providing the five component slots that have no built-in Material default: `Image`, `Video`, `AudioPlayer`, `UrlOpener`, `MessageFormatter`. |
-| `GeminiClient.kt` | Plain `HttpURLConnection` + `org.json` call to `POST /v1beta/models/{model}:generateContent` (no SDK dependency). The system instruction restates the exact protocol rules from `A2uiDemoPrompts.kt` (version-as-sibling, `root` id, absolute `updateDataModel` paths, data-binding for interactive values) plus the full Basic Catalog V1 component/property reference, so Gemini's freeform response is a directly-consumable JSON-Lines script. |
+| `GeminiClient.kt` | Plain `HttpURLConnection` + `org.json` call to `POST /v1beta/models/{model}:generateContent` (no SDK dependency). The system instruction restates the exact protocol rules from `A2uiDemoPrompts.kt` (version-as-sibling, `root` id, absolute `updateDataModel` paths, data-binding for interactive values) plus the full Basic Catalog V1 component/property reference, so Gemini's freeform response is a directly-consumable JSON-Lines script. `generateA2uiScript(apiKey, userPrompt, history)` accepts prior `GeminiTurn`s to support multi-turn conversations and returns an `A2uiGenerationResult` (parsed `messages` + `rawResponseText`, the latter fed back in as the next `"model"` turn). |
 | `GeminiApiKeyStore.kt` | Reads/writes the API key from a private `SharedPreferences` file. |
 | `AiPromptScreen.kt` | Free-text prompt input (with tap-to-fill suggestions), calls `generateA2uiScript()` on a coroutine, and renders the result via `A2uiMessagesRenderer`. |
+| `AiConversationScreen.kt` | Keeps a `MutableList<GeminiTurn>` conversation history. Each turn is either the user's typed instruction, or an auto-generated description of a `Button` tap (event name + context + current data model, read straight off the `A2uiClientEventMessage` delivered via `onClientEvent`) — both go through the same `sendTurn()` path, which calls Gemini with the accumulated history and re-renders the new script with a bumped `key` so the UI always starts clean for the next step. |
 | `GeminiSettingsScreen.kt` | Simple API key entry field (with a show/hide toggle) that saves to `GeminiApiKeyStore`. |
 
 ## The A2UI protocol, as used by this app

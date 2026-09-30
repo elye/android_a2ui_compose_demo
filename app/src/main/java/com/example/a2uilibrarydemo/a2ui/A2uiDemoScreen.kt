@@ -16,12 +16,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.a2ui.compose.runtime.A2uiMessageParser
 import androidx.a2ui.compose.ui.A2uiMessageProcessor
 import androidx.a2ui.model.processor.processInput
 import androidx.a2ui.model.protocol.A2uiClientErrorMessage
+import androidx.a2ui.model.protocol.A2uiClientToServerMessage
 import kotlinx.coroutines.flow.collect
 import org.json.JSONObject
 
@@ -48,11 +50,13 @@ fun A2uiDemoScreen(prompt: DemoPrompt, modifier: Modifier = Modifier) {
 /**
  * Reusable core of the demo: feeds an arbitrary A2UI JSON-Lines [messages] script into a fresh
  * [androidx.a2ui.model.processor.A2uiMessageProcessor] and renders the resulting surface via
- * [A2uiSurface]. Used both by [A2uiDemoScreen] (hand-written catalog scripts) and the AI Prompt
- * screen (scripts generated on the fly by Gemini).
+ * [A2uiSurface]. Used both by [A2uiDemoScreen] (hand-written catalog scripts) and the AI Prompt /
+ * multi-step conversation screens (scripts generated on the fly by Gemini).
  *
  * A brand new processor/parser pair is created whenever [key] changes, so switching to a new
- * script always starts from a clean slate.
+ * script always starts from a clean slate. Every outbound [A2uiClientToServerMessage] (button taps,
+ * protocol errors, etc.) is forwarded to [onClientEvent], letting a caller react to user
+ * interaction with the rendered UI (e.g. to drive a multi-step AI conversation).
  */
 @Composable
 fun A2uiMessagesRenderer(
@@ -60,11 +64,13 @@ fun A2uiMessagesRenderer(
     key: Any,
     modifier: Modifier = Modifier,
     loadingLabel: String = "Loading…",
+    onClientEvent: (A2uiClientToServerMessage) -> Unit = {},
 ) {
     val processor = remember(key) {
         A2uiMessageProcessor(listOf(buildDemoCatalog()))
     }
     val parser = remember(key) { A2uiMessageParser() }
+    val currentOnClientEvent = rememberUpdatedState(onClientEvent)
 
     // The processor only enqueues incoming messages onto an internal channel; collectMessages()
     // must be actively running to drain that queue and actually apply the updates.
@@ -73,7 +79,7 @@ fun A2uiMessagesRenderer(
     }
 
     // Surface any silently-caught protocol/validation errors so we can diagnose issues on device
-    // via `adb logcat -s A2uiDemoScreen`.
+    // via `adb logcat -s A2uiDemoScreen`, and forward every event to the caller.
     LaunchedEffect(processor) {
         processor.outboundEvents.collect { event ->
             if (event is A2uiClientErrorMessage) {
@@ -85,6 +91,7 @@ fun A2uiMessagesRenderer(
             } else {
                 Log.d(TAG, "A2UI outbound event: $event")
             }
+            currentOnClientEvent.value(event)
         }
     }
 

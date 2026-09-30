@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ViewQuilt
 import androidx.compose.material3.Card
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import com.example.a2uilibrarydemo.a2ui.A2uiDemoScreen
 import com.example.a2uilibrarydemo.a2ui.DemoPrompt
 import com.example.a2uilibrarydemo.a2ui.demoPromptsByCategory
+import com.example.a2uilibrarydemo.ai.AiConversationScreen
 import com.example.a2uilibrarydemo.ai.AiPromptScreen
 import com.example.a2uilibrarydemo.ai.GeminiSettingsScreen
 import com.example.a2uilibrarydemo.ui.theme.A2UILibraryDemoTheme
@@ -55,28 +57,34 @@ class MainActivity : ComponentActivity() {
 
 /** The app's top-level destinations, selectable from the [HomeScreen]. */
 private enum class TopScreen {
-    /** Landing screen: pick between the two modes below. */
+    /** Landing screen: pick between the three modes below. */
     HOME,
 
     /** The original tutorial: a picker of hand-written A2UI JSON-Lines scripts, one per component. */
     CATALOG,
 
-    /** The new demo: a free-text prompt is sent to Gemini, which writes the A2UI script itself. */
+    /** One-off demo: a free-text prompt is sent to Gemini, which writes the A2UI script itself. */
     AI_PROMPT,
 
-    /** Where the user pastes their Gemini API key, used by [AI_PROMPT]. */
+    /** Multi-step demo: prompt -> rendered UI -> user interacts -> conversation continues. */
+    AI_CONVERSATION,
+
+    /** Where the user pastes their Gemini API key, used by [AI_PROMPT] and [AI_CONVERSATION]. */
     SETTINGS,
 }
 
 /**
- * Root composable for the A2UI tutorial app. Shows a [HomeScreen] with two entry points:
+ * Root composable for the A2UI tutorial app. Shows a [HomeScreen] with three entry points:
  * - **Catalog Demo**: the original tutorial, a selectable list of hand-written A2UI prompts, one
  *   per Basic Catalog V1 component, rendered directly by [A2uiDemoScreen].
  * - **AI Prompt Demo**: a free-text prompt is sent to the Gemini API (see [AiPromptScreen]), which
  *   writes an A2UI JSON-Lines script on the fly; the result is rendered the exact same way.
+ * - **Multi-Step AI Demo**: like AI Prompt Demo, but the conversation continues — tapping a
+ *   `Button` in the generated UI (see [AiConversationScreen]) reports the interaction back to
+ *   Gemini, which responds with the next step's UI.
  *
- * A [TopScreen.SETTINGS] destination (reachable from the home screen's toolbar action, or from the
- * AI Prompt screen directly) lets the user paste in their own Gemini API key.
+ * A [TopScreen.SETTINGS] destination (reachable from the home screen's toolbar action, or from
+ * either AI screen directly) lets the user paste in their own Gemini API key.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,6 +98,7 @@ fun A2uiDemoApp(modifier: Modifier = Modifier) {
         TopScreen.HOME -> "A2UI Library Demo"
         TopScreen.CATALOG -> selectedPrompt?.title ?: "Catalog Demo"
         TopScreen.AI_PROMPT -> "AI Prompt Demo"
+        TopScreen.AI_CONVERSATION -> "Multi-Step AI Demo"
         TopScreen.SETTINGS -> "Settings"
     }
 
@@ -102,7 +111,7 @@ fun A2uiDemoApp(modifier: Modifier = Modifier) {
             } else {
                 topScreen = TopScreen.HOME
             }
-            TopScreen.AI_PROMPT, TopScreen.SETTINGS -> topScreen = TopScreen.HOME
+            TopScreen.AI_PROMPT, TopScreen.AI_CONVERSATION, TopScreen.SETTINGS -> topScreen = TopScreen.HOME
             TopScreen.HOME -> Unit
         }
     }
@@ -133,6 +142,7 @@ fun A2uiDemoApp(modifier: Modifier = Modifier) {
             TopScreen.HOME -> HomeScreen(
                 onCatalogSelected = { topScreen = TopScreen.CATALOG },
                 onAiPromptSelected = { topScreen = TopScreen.AI_PROMPT },
+                onAiConversationSelected = { topScreen = TopScreen.AI_CONVERSATION },
                 modifier = Modifier.padding(innerPadding),
             )
 
@@ -153,16 +163,22 @@ fun A2uiDemoApp(modifier: Modifier = Modifier) {
                 modifier = Modifier.padding(innerPadding),
             )
 
+            TopScreen.AI_CONVERSATION -> AiConversationScreen(
+                onOpenSettings = { topScreen = TopScreen.SETTINGS },
+                modifier = Modifier.padding(innerPadding),
+            )
+
             TopScreen.SETTINGS -> GeminiSettingsScreen(modifier = Modifier.padding(innerPadding))
         }
     }
 }
 
-/** Landing screen: lets the user pick between the base catalog render and the AI-driven demo. */
+/** Landing screen: lets the user pick between the base catalog render and the two AI-driven demos. */
 @Composable
 private fun HomeScreen(
     onCatalogSelected: () -> Unit,
     onAiPromptSelected: () -> Unit,
+    onAiConversationSelected: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -199,6 +215,22 @@ private fun HomeScreen(
                     headlineContent = { Text("AI Prompt Demo") },
                     supportingContent = {
                         Text("Describe a UI in your own words and have Gemini generate + render it live.")
+                    },
+                )
+            }
+        }
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp)
+                    .clickable(onClick = onAiConversationSelected),
+            ) {
+                ListItem(
+                    leadingContent = { Icon(Icons.Filled.Forum, contentDescription = null) },
+                    headlineContent = { Text("Multi-Step AI Demo") },
+                    supportingContent = {
+                        Text("Prompt Gemini, tap a button in the result, and watch the conversation continue.")
                     },
                 )
             }

@@ -78,24 +78,54 @@ private val SYSTEM_INSTRUCTION = """
     AudioPlayer (https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3) unless the user
     asks for something else specific. Keep the generated UI reasonably small and directly relevant
     to the user's request. Output nothing but the JSON-Lines script.
+
+    MULTI-STEP CONVERSATIONS: some user turns won't be a fresh UI request — they'll describe what
+    just happened in the UI you previously generated (e.g. "The user tapped button 'submit' with
+    context {...}. Current field values: {...}."). When that happens, treat it as the next step of
+    the same flow: respond with a brand-new complete script (still starting with createSurface)
+    that reflects the outcome of that interaction — e.g. show a confirmation/success screen after a
+    submit button, advance a multi-step form to its next field, or reflect an updated selection.
+    Keep continuity with what was already shown; don't start over on an unrelated UI.
 """.trimIndent()
 
 class GeminiApiException(message: String) : Exception(message)
 
+/** One turn of Gemini conversation history, either `"user"` or `"model"`. */
+data class GeminiTurn(val role: String, val text: String)
+
+/** Result of a single `generateA2uiScript` call: the parsed script plus the raw text for history. */
+data class A2uiGenerationResult(val messages: List<String>, val rawResponseText: String)
+
 /**
  * Calls the Gemini API's `generateContent` REST endpoint (no SDK dependency — plain
- * [HttpURLConnection] + `org.json`) with [SYSTEM_INSTRUCTION] as the system prompt and [userPrompt]
- * as the user turn, and returns the model's raw text response split into non-blank lines (each
- * expected to be one A2UI protocol JSON-Lines message).
+ * [HttpURLConnection] + `org.json`) with [SYSTEM_INSTRUCTION] as the system prompt, [history] as
+ * prior conversation turns, and [userPrompt] as the newest user turn. Returns the model's raw text
+ * response (for appending to [history] on the next call) split into non-blank lines, each expected
+ * to be one A2UI protocol JSON-Lines message.
  */
 suspend fun generateA2uiScript(
     apiKey: String,
     userPrompt: String,
+    history: List<GeminiTurn> = emptyList(),
     model: String = DEFAULT_MODEL,
-): List<String> = withContext(Dispatchers.IO) {
+): A2uiGenerationResult = withContext(Dispatchers.IO) {
     if (apiKey.isBlank()) {
         throw GeminiApiException("No Gemini API key set. Add one in Settings.")
     }
+
+    val contents = JSONArray()
+    for (turn in history) {
+        contents.put(
+            JSONObject()
+                .put("role", turn.role)
+                .put("parts", JSONArray().put(JSONObject().put("text", turn.text))),
+        )
+    }
+    contents.put(
+        JSONObject()
+            .put("role", "user")
+            .put("parts", JSONArray().put(JSONObject().put("text", userPrompt))),
+    )
 
     val requestBody = JSONObject().apply {
         put(
@@ -105,14 +135,7 @@ suspend fun generateA2uiScript(
                 JSONArray().put(JSONObject().put("text", SYSTEM_INSTRUCTION)),
             ),
         )
-        put(
-            "contents",
-            JSONArray().put(
-                JSONObject()
-                    .put("role", "user")
-                    .put("parts", JSONArray().put(JSONObject().put("text", userPrompt))),
-            ),
-        )
+        put("contents", contents)
         put(
             "generationConfig",
             JSONObject().put("responseMimeType", "text/plain").put("temperature", 0.4),
@@ -162,10 +185,12 @@ suspend fun generateA2uiScript(
             }
         }
 
-        stripMarkdownFences(text)
+        val messages = stripMarkdownFences(text)
             .lines()
             .map { it.trim() }
             .filter { it.isNotEmpty() }
+
+        A2uiGenerationResult(messages = messages, rawResponseText = text)
     } finally {
         connection.disconnect()
     }

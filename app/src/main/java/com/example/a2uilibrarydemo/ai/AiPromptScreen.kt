@@ -83,8 +83,8 @@ fun AiPromptScreen(onOpenSettings: () -> Unit, modifier: Modifier = Modifier) {
         errorMessage = null
         coroutineScope.launch {
             runCatching { generateA2uiScript(apiKey = apiKey, userPrompt = promptText) }
-                .onSuccess { messages ->
-                    generatedMessages = messages
+                .onSuccess { result ->
+                    generatedMessages = result.messages
                     generationId += 1
                 }
                 .onFailure { throwable ->
