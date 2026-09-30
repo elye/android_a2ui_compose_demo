@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.a2ui.A2uiSurface
@@ -21,6 +23,7 @@ import androidx.a2ui.compose.ui.A2uiMessageProcessor
 import androidx.a2ui.model.processor.processInput
 import androidx.a2ui.model.protocol.A2uiClientErrorMessage
 import kotlinx.coroutines.flow.collect
+import org.json.JSONObject
 
 private const val TAG = "A2uiDemoScreen"
 
@@ -95,18 +98,20 @@ fun A2uiMessagesRenderer(
 
     val activeSurfaces by processor.activeSurfaces.collectAsState()
     val surface = activeSurfaces.firstOrNull()
+    // A List component renders its own LazyColumn internally; nesting that inside a
+    // verticalScroll()'d container throws "measured with an infinity maximum height constraints".
+    // Everything else (Text, Column, Card, Tabs, etc.) doesn't self-scroll, so a long generated
+    // script would otherwise be cut off with no way to see the rest — only skip the outer scroll
+    // when the script contains a List.
+    val hasSelfScrollingList = remember(key) { messages.any { it.containsListComponent() } }
 
     Box(modifier = modifier.fillMaxSize()) {
         if (surface != null) {
-            // Deliberately no outer Modifier.verticalScroll() here: some A2UI Basic Catalog V1
-            // components (e.g. List) render their own LazyColumn internally, and nesting a
-            // LazyColumn inside a verticalScroll()'d container throws
-            // "Vertically scrollable component was measured with an infinity maximum height
-            // constraints". Each rendered component tree is responsible for its own scrolling.
             A2uiSurface(
                 surfaceModel = surface,
                 modifier = Modifier
                     .fillMaxSize()
+                    .let { if (hasSelfScrollingList) it else it.verticalScroll(rememberScrollState()) }
                     .padding(16.dp),
                 loadingContent = { A2uiSurfaceDefaults.LoadingIndicator() },
                 errorContent = { exception -> A2uiSurfaceDefaults.ErrorFallback(exception) },
@@ -125,3 +130,11 @@ fun A2uiMessagesRenderer(
         }
     }
 }
+
+/** Whether this single A2UI JSON-Lines message declares a `"component":"List"`. */
+private fun String.containsListComponent(): Boolean = runCatching {
+    val components = JSONObject(this).optJSONObject("updateComponents")
+        ?.optJSONArray("components")
+        ?: return@runCatching false
+    (0 until components.length()).any { i -> components.getJSONObject(i).optString("component") == "List" }
+}.getOrDefault(false)
